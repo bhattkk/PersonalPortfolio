@@ -1,0 +1,3 @@
+kiteconnect
+gspread
+google-auth
