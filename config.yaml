@@ -1,0 +1,4 @@
+# config to store various settings like telegram bot token, API keys, etc.
+telegram_bot : 
+  token: "8343641473:AAFNxIsubtCq6tsM2cKU1JS_4DGjVWrHGbM"
+  chat_id: "1336937041"

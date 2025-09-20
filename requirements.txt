@@ -1,3 +1,9 @@
 kiteconnect
 gspread
 google-auth
+python-telegram-bot
+telegram
+pandas
+numpy
+apscheduler
+pyyaml
