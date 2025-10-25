@@ -1,55 +1,205 @@
 from kiteconnect import KiteConnect
 from messaging.telegram_bot import TelegramBot
+from kite.CsvWriter import CsvWriter
 import json, sys, time, os, csv, datetime as dt
+import logging
+import yfinance as yf
 
 API_KEY    = os.environ.get("KITE_API_KEY")
 API_SECRET  = os.environ.get("KITE_API_SECRET")
 SESSION_F  = "kite_session.json"
-OUT_CSV    = "portfolio_" + dt.date.today().isoformat() + ".csv"
+OUT_CSV    = "portfolio_report.csv"
+
+def no_decimal(value):
+    try:
+        # Try converting to float, then int
+        return str(int(float(value)))
+    except (ValueError, TypeError):
+        # If not a number, keep as string
+        return str(value)
+    
+def get_yfticker(symbol):
+    yfticker = yf.Ticker(symbol)
+    if not logging.info or yfticker.info.get("regularMarketPrice") is None:
+        print(f"{symbol} is invalid or not listed on Yahoo Finance")
+        return None
+    return yfticker
+
+def details_from_yfinance(csv_writer, symbols):
+    for symbol in symbols:
+        try:
+            yfticker = get_yfticker(symbol+".NS")
+
+            # if contains -SM, and ticker not found then try removing -SM
+            if yfticker is None:
+                if "-SM" in symbol:
+                    yfticker = get_yfticker(symbol.replace("-SM", "")+".NS")
+            
+            if yfticker is None:
+                # try getting BSE_TOKEN from kite_instruments.csv
+                with open("kite_instruments.csv", "r") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row["Symbol"] == symbol:
+                            bse_token = row.get("BSE_TOKEN", "")
+                            if bse_token:
+                                print(f"Found BSE_TOKEN {bse_token} for {symbol}")
+                                yfticker = get_yfticker(f"{bse_token}.BO")
+                            break
+
+            if yfticker is None:
+                print(f"❌ Skipping {symbol} as no valid ticker found on yfinance.")
+                continue
+
+            info = yfticker.info
+            print(f"Fetched data for {symbol} from yfinance.")
+            #csv_writer.AddHeaders(["MarketCap","PE","PB","52WeekHigh","DiffFrom52WH","52WeekLow", "DiffFrom52WL"])
+            market_cap = info.get("marketCap", "")
+            # Market Cap in crores
+            if market_cap != "":
+                market_cap = int(market_cap) / 1e7
+            csv_writer.AddValue(symbol, "MarketCap", no_decimal(market_cap))
+            csv_writer.AddValue(symbol, "PE", no_decimal(info.get("trailingPE", "")))
+            csv_writer.AddValue(symbol, "PB", no_decimal(info.get("priceToBook", "")))
+            csv_writer.AddValue(symbol, "52WeekHigh", no_decimal(info.get("fiftyTwoWeekHigh", "")))
+            
+            diffFrom52WH = ""
+            if info.get("fiftyTwoWeekHigh", "") and info.get("regularMarketPrice", ""):
+                diffFrom52WH = (info["regularMarketPrice"] - info["fiftyTwoWeekHigh"]) / info["fiftyTwoWeekHigh"] * 100
+            csv_writer.AddValue(symbol, "DiffFrom52WH (%)", no_decimal(diffFrom52WH))
+
+            csv_writer.AddValue(symbol, "52WeekLow", no_decimal(info.get("fiftyTwoWeekLow", "")))
+            
+            diffFrom52WL = ""
+            if info.get("fiftyTwoWeekLow", "") and info.get("regularMarketPrice", ""):
+                diffFrom52WL = (info["regularMarketPrice"] - info["fiftyTwoWeekLow"]) / info["fiftyTwoWeekLow"] * 100
+            csv_writer.AddValue(symbol, "DiffFrom52WL (%)", no_decimal(diffFrom52WL))
+
+        except Exception as e:
+            print(f"❌ Failed to fetch data for {symbol} from yfinance: {e}")
 
 class KiteWrapper:
     def __init__(self, bot):
+        self.logger = logging.getLogger(__name__)
         self.bot = bot
-        bot.register_callback("/watchlist", lambda msg: self.refresh_watchlist())
-        bot.register_callback('/token', lambda msg: self.access_token(msg.split()[-1]))
+        self.logger.info("KiteWrapper initialized.")
+        bot.register_callback("refresh_sd", self.refresh_static_data)
+        bot.register_callback("watchlist", self.refresh_watchlist)
+        bot.register_callback('token', self.access_token)
+        bot.register_callback('login', self.login_once)
+        self.kite = KiteConnect(api_key=API_KEY)
  
     def login_once(self):
         """Run this once in the morning to generate a session token."""
-        self.kite = KiteConnect(api_key=API_KEY)
-        print("Login URL:", kite.login_url())
-        self.bot.send_message("Please visit the above URL and authorize the app. Then paste the 'request_token' parameter from the redirected URL here.")
+        print("Login URL:", self.kite.login_url())
+        return self.kite.login_url()
         
     def access_token(self, request_token):
         data = self.kite.generate_session(request_token, api_secret=API_SECRET)
         with open(SESSION_F, "w") as f:
             json.dump({"access_token": data["access_token"]}, f)
-        print("✔ token saved for today.")
+        print("✔ token saved for today: ", data["access_token"])
+        self.kite.set_access_token(data["access_token"])
 
     def load_token():
         with open(SESSION_F) as f:
             return json.load(f)["access_token"]
-
-    def refresh_watchlist(self):
-        kite = KiteConnect(api_key=API_KEY)
+    
+    def validate_token(self):
         try:
-            kite.set_access_token(self.load_token())
-            # Quick light call to verify session
-            kite.profile()
+            with open(SESSION_F) as f:
+                data = json.load(f)
+                access_token = data.get("access_token", "")
+                if not access_token:
+                    raise ValueError("Access token not found in session file.")
+                self.kite.set_access_token(access_token)
+                profile = self.kite.profile()
+                print("✔ Token valid. User:", profile.get("user_name", "Unknown"))
+                return True
         except Exception as e:
-            self.bot.send_message("⚠️ Failed to authenticate with saved token. Please run /token <request_token> again.")
+            print("❌ Token validation failed:", str(e))
+            return False
 
-        holdings  = kite.holdings()
-        positions = kite.positions()
+    async def refresh_static_data(self):
+        validate_token = self.validate_token()
+        if not validate_token:
+            await self.bot.send_message("❌ Token invalid or expired. Please /login again.")
+            return False
+        
+        csv_writer = CsvWriter()
+        csv_writer.AddHeaders(["InstrumentToken","Name","BSE_TOKEN","NSE_TOKEN","Segment","InstrumentType"])
 
-        # write a compact CSV
-        with open(OUT_CSV, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["Type","Symbol","Qty","AvgPrice","LTP","P&L"])
-            for h in holdings:
-                w.writerow(["HOLDING", h["tradingsymbol"], h["quantity"], h["average_price"], h["last_price"], h.get("pnl", "")])
-            for p in positions.get("net", []):
-                w.writerow(["POSITION", p["tradingsymbol"], p["quantity"], p["average_price"], p["last_price"], p.get("pnl","")])
-        print("Saved", OUT_CSV)
-        self.bot.send_message("✔ Portfolio refreshed. Sending CSV...")
-        self.bot.send_csv(OUT_CSV)
-        self.bot.send_message("Use /refresh to refresh portfolio anytime.")
+        for exchange in ["NSE","BSE"]:
+            instruments = self.kite.instruments(exchange=exchange)
+            for instr in instruments:
+                symbol = instr["tradingsymbol"]
+                instType = instr["instrument_type"]
+                instToken = instr["instrument_token"]
+                exchangeToken = instr["exchange_token"]
+                segment = instr["segment"]
+                name = instr["name"]
+                if instType not in ["EQ","MF"]:
+                    continue
+                csv_writer.AddRow(symbol)
+                csv_writer.AddValue(symbol, "Name", name)
+                csv_writer.AddValue(symbol, "InstrumentType", instType)
+                csv_writer.AddValue(symbol, "Segment", segment)
+                csv_writer.AddValue(symbol, "InstrumentToken", str(instToken))
+                csv_writer.AddValue(symbol, f"{exchange}_TOKEN", str(exchangeToken))
+
+        # delete old file if exists
+        if os.path.exists("kite_instruments.csv"):
+            os.remove("kite_instruments.csv")
+            print("✔ Old file deleted: kite_instruments.csv")
+        csv_writer.DumpCsv("kite_instruments.csv")
+        print(f"Static instrument data saved: kite_instruments.csv")
+               
+        await self.bot.send_message(f"✔ Fetched {len(instruments)} instruments from Kite.")
+        return True
+
+    async def refresh_watchlist(self):
+        validate_token = self.validate_token()
+        if not validate_token:
+            await self.bot.send_message("❌ Token invalid or expired. Please /login again for latest.")
+            if os.path.exists(OUT_CSV):
+                await self.bot.send_csv(OUT_CSV)
+
+        holdings  = self.kite.holdings()
+        positions = self.kite.positions()
+
+        csv_writer = CsvWriter()
+        self.prepare_watchlist(holdings, positions, csv_writer)
+        csv_writer.DumpCsv(OUT_CSV)
+
+        print(f"Latest Portfolio report generated: {OUT_CSV}")
+        await self.bot.send_csv(OUT_CSV)
+    
+
+    def prepare_watchlist(self, holdings, positions, csv_writer):
+        symbols = []
+        self.details_from_kite(csv_writer, holdings, "HOLDING", symbols)
+        self.details_from_kite(csv_writer, positions.get("net", []), "POSITION", symbols)
+        details_from_yfinance(csv_writer, symbols)
+
+    def details_from_kite(self, csv_writer, holdingsorPositions, data_type, symbols=[]):
+        csv_writer.AddHeaders(["Type","Invested","P&L", "BuyPrice","LTP"])
+        Pnl_Percent_header = "P&L Percent"
+        csv_writer.AddHeaderAfter("P&L", Pnl_Percent_header)
+        for item in holdingsorPositions:
+            symbol = item["tradingsymbol"]
+            csv_writer.AddRow(symbol)
+            symbols.append(symbol)
+            csv_writer.AddValue(symbol, "Type", data_type)
+            avg_price = item["average_price"]
+            qty = item["quantity"]
+            pnl = item.get("pnl", 0)
+
+            csv_writer.AddValue(symbol, "Invested", no_decimal(avg_price * qty))
+            csv_writer.AddValue(symbol, "P&L", no_decimal(pnl))
+            csv_writer.AddValue(symbol, "BuyPrice", no_decimal(avg_price))
+            csv_writer.AddValue(symbol, "LTP", no_decimal(item["last_price"]))
+            
+            pnl_percent = pnl / (avg_price * qty) * 100 if avg_price * qty != 0 else 0
+            csv_writer.AddValue(symbol, Pnl_Percent_header, no_decimal(pnl_percent))
+
+
