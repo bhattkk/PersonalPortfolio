@@ -4,6 +4,9 @@ from kite.CsvWriter import CsvWriter
 import json, sys, time, os, csv, datetime as dt
 import logging
 import yfinance as yf
+import glob
+import pandas as pd
+from datetime import datetime
 
 API_KEY    = os.environ.get("KITE_API_KEY")
 API_SECRET  = os.environ.get("KITE_API_SECRET")
@@ -77,6 +80,101 @@ def details_from_yfinance(csv_writer, symbols):
 
         except Exception as e:
             print(f"❌ Failed to fetch data for {symbol} from yfinance: {e}")
+
+def cagr_from_the_tradebook(csv_writer, holdings):
+    # --- Read and combine tradebooks ---
+    files = glob.glob("tradebook*.csv")
+    dfs = [pd.read_csv(f) for f in files]
+    trades = pd.concat(dfs, ignore_index=True)
+    # --- Clean and prepare ---
+    trades['trade_date'] = pd.to_datetime(trades['trade_date'])
+    trades['trade_type'] = trades['trade_type'].str.lower()
+    
+    # if  symbol column contains '-', keep only part before '-'
+    trades['symbol'] = trades['symbol'].apply(lambda x: x.split('-')[0] if '-' in x else x)
+    # Combine by date, symbol, and trade_type
+    # per day quantity needs to be added and price averaged
+    agg = (
+        trades.groupby(['symbol', 'trade_date', 'trade_type'])
+        .agg({'quantity': 'sum', 'price': 'mean'})
+        .reset_index()
+        .sort_values(['symbol', 'trade_date'])
+    )
+    today = datetime.now()
+
+    for holding in holdings:
+        symbol = holding['tradingsymbol']
+        qty = holding['quantity']
+        ltp = holding['last_price']
+        if qty <= 0:
+            continue
+
+        # Remove if anything after char '-' in symbol
+        symbol_temp = symbol
+        if '-' in symbol:
+            symbol_temp = symbol.split('-')[0]
+
+        # Filter trades for this symbol
+        sym_trades = agg[agg['symbol'].str.contains(symbol_temp)].copy()
+
+        if sym_trades.empty:
+            continue
+
+        # Sort by date descending
+        sym_trades = sym_trades.sort_values('trade_date', ascending=False)
+
+        remaining_qty = qty
+        used_buys = [] # to store (quantity, average_price, date)
+        for _, row in sym_trades.iterrows():
+            if remaining_qty <= 0:
+                break
+            if row['trade_type'] != 'buy':
+                continue
+
+            trade_qty = row['quantity']
+            trade_price = row['price']
+            trade_date = row['trade_date']
+
+            print (f"Processing {symbol}: trade_date={trade_date.date()}, trade_type={row['trade_type']}, trade_qty={trade_qty}, trade_price={trade_price}")
+
+            if trade_qty <= remaining_qty:
+                used_buys.append((trade_qty, trade_price, trade_date))
+                remaining_qty -= trade_qty
+            else:
+                used_buys.append((remaining_qty, trade_price, trade_date))
+                remaining_qty = 0
+
+        if not used_buys:
+                continue
+
+        # --- Compute weighted CAGR ---
+        total_qty = sum(qty for qty, _, _ in used_buys)
+        cagr_parts = []
+        for qty, price, date in used_buys:
+            years = max((today - date).days / 365, 1/365)
+            cagr = ((ltp / price) ** (1 / years) - 1) * 100
+            cagr_parts.append((qty, cagr))
+
+        weighted_cagr = sum(qty * cagr for qty, cagr in cagr_parts) / total_qty
+        holding_period_num = int(sum((today - d).days for _, _, d in used_buys) / len(used_buys))
+        if holding_period_num < 100:
+            holding_period = f"{holding_period_num} days"
+        else:
+            holding_period = f"{holding_period_num // 30} months"
+
+        # buy dates like 23 Oct 2023, 15 Jan 2024 sorted and unique
+        buy_dates = []
+        
+        # Assuming used_buys is a list of tuples (_, _, datetime_object)
+        buy_dates = sorted([d for _, _, d in used_buys])
+        buy_dates = [d.strftime("%d %b %Y") for d in buy_dates]
+        buy_dates = ", ".join(buy_dates)
+
+
+        csv_writer.AddValue(symbol, "Buy Dates", buy_dates)
+        csv_writer.AddValue(symbol, "Holding Period", holding_period)
+        csv_writer.AddValue(symbol, "CAGR (%)", no_decimal(round(weighted_cagr, 2)))
+        
 
 class KiteWrapper:
     def __init__(self, bot):
@@ -173,6 +271,7 @@ class KiteWrapper:
 
         print(f"Latest Portfolio report generated: {OUT_CSV}")
         await self.bot.send_csv(OUT_CSV)
+        return True
     
 
     def prepare_watchlist(self, holdings, positions, csv_writer):
@@ -180,6 +279,7 @@ class KiteWrapper:
         self.details_from_kite(csv_writer, holdings, "HOLDING", symbols)
         self.details_from_kite(csv_writer, positions.get("net", []), "POSITION", symbols)
         details_from_yfinance(csv_writer, symbols)
+        cagr_from_the_tradebook(csv_writer, holdings)
 
     def details_from_kite(self, csv_writer, holdingsorPositions, data_type, symbols=[]):
         csv_writer.AddHeaders(["Type","Invested","P&L", "BuyPrice","LTP"])
