@@ -1,10 +1,9 @@
-kiteconnect
-gspread
-google-auth
-python-telegram-bot
-telegram
-pandas
-numpy
-apscheduler
-pyyaml
-yfinance
+# Shared Python deps for portfolio services
+kiteconnect>=4.0.0
+python-telegram-bot>=20.0
+apscheduler>=3.10.0
+redis>=5.0.0
+psycopg2-binary>=2.9.0
+pyyaml>=6.0
+pandas>=2.0.0
+yfinance>=0.2.0

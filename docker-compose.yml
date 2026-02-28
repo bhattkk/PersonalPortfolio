@@ -1,0 +1,104 @@
+# Docker Compose Portfolio Application
+# Services: postgres, redis, telegram, kite-portfolio, stocks-refdata, kite-market-data
+# Secrets via env: KITE_API_KEY, KITE_API_SECRET, TELEGRAM_BOT_TOKEN, CHAT_ID
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: portfolio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-portfolio}
+      POSTGRES_DB: portfolio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portfolio -d portfolio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  telegram:
+    build:
+      context: .
+      dockerfile: services/telegram/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio}@postgres:5432/portfolio
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      CHAT_ID: ${CHAT_ID}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kite-portfolio:
+    build:
+      context: .
+      dockerfile: services/kite-portfolio/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio}@postgres:5432/portfolio
+      KITE_API_KEY: ${KITE_API_KEY}
+      KITE_API_SECRET: ${KITE_API_SECRET}
+      TELEGRAM_CHAT_ID: ${CHAT_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  stocks-refdata:
+    build:
+      context: .
+      dockerfile: services/stocks-refdata/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio}@postgres:5432/portfolio
+      KITE_API_KEY: ${KITE_API_KEY}
+      KITE_API_SECRET: ${KITE_API_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kite-market-data:
+    build:
+      context: .
+      dockerfile: services/kite-market-data/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_URL: postgresql://portfolio:${POSTGRES_PASSWORD:-portfolio}@postgres:5432/portfolio
+      KITE_API_KEY: ${KITE_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
