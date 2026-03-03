@@ -6,15 +6,13 @@ import logging
 import os
 import time
 
+from app_logging import setup_logging
 from kiteconnect import KiteConnect
 
 from db import get_eq_index_instrument_tokens, get_kite_token
 from redis_cache import get_redis, set_ltp
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+setup_logging("kite-market-data")
 logger = logging.getLogger(__name__)
 
 INTERVAL_SEC = int(os.environ.get("MARKET_DATA_INTERVAL", "60"))

@@ -4,15 +4,13 @@ stocks-refdata: scheduler runs instruments + fundamentals at midnight; optional 
 import logging
 import os
 
+from app_logging import setup_logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from refdata_job import run_job
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+setup_logging("stocks-refdata")
 logger = logging.getLogger(__name__)
 
 

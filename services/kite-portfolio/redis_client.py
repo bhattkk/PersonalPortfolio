@@ -15,7 +15,7 @@ COMMANDS_CHAN = "telegram:commands"
 REPLY_CTX_PREFIX = "reply_context:ctx:"
 REPLY_TTL = 3600
 POLL_INTERVAL = 1
-POLL_TIMEOUT = 300  # 5 min wait for token
+POLL_TIMEOUT = 30*60  # 30 min wait for token
 
 
 def get_redis():

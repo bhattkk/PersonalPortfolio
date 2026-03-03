@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY app_logging /app/app_logging
 COPY kite /app/kite
 COPY services/kite-portfolio /app/services/kite-portfolio
 

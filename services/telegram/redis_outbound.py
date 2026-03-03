@@ -2,11 +2,12 @@
 Consume Redis stream telegram:outbound; send messages via Telegram API.
 Reply context stored in Redis only (reply_context:ctx:{id}, reply_context:chat:{chat_id}).
 """
+import asyncio
 import base64
 import io
 import logging
 import os
-
+from typing import Optional
 import redis.asyncio as redis
 
 STREAM_KEY = "telegram:outbound"
@@ -46,8 +47,18 @@ async def ensure_consumer_group(r: redis.Redis):
             raise
 
 
-async def process_message(application, r: redis.Redis, msg_id: str, data: dict):
+def _stream_data_to_dict(data):
+    """Normalize stream entry: Redis may return dict or flat list [k, v, k, v]."""
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, (list, tuple)) and len(data) % 2 == 0:
+        return {str(data[i]): str(data[i + 1]) for i in range(0, len(data), 2)}
+    return {}
+
+
+async def process_message(application, r: redis.Redis, msg_id: str, data):
     """Process one outbound message and optionally set reply context."""
+    data = _stream_data_to_dict(data)
     msg_type = data.get("type")
     chat_id = data.get("chat_id")
     if chat_id is None:
@@ -95,26 +106,37 @@ async def process_message(application, r: redis.Redis, msg_id: str, data: dict):
 
 
 async def consume_outbound_loop(application):
-    """Read from telegram:outbound and send messages; ACK after send."""
     r = await get_redis()
     await ensure_consumer_group(r)
-    last_id = "0"
+    last_id = "0"  # Start with "0" to recover pending messages first
+    logger.info("Outbound consumer started: reading stream %s (group=%s)", STREAM_KEY, CONSUMER_GROUP)
+
     while True:
         try:
             streams = await r.xreadgroup(
                 CONSUMER_GROUP, CONSUMER_NAME, {STREAM_KEY: last_id},
                 count=10, block=5000
             )
+            
             if not streams:
+                # No more pending messages — switch to new messages
+                if last_id == "0":
+                    last_id = ">"
                 continue
+
             for stream_name, messages in streams:
+                if len(messages) > 0:
+                    logger.info("Received %d message(s) from %s", len(messages), stream_name)
                 for msg_id, data in messages:
                     try:
                         await process_message(application, r, msg_id, data)
                         await r.xack(STREAM_KEY, CONSUMER_GROUP, msg_id)
+                        await r.xdel(STREAM_KEY, msg_id)
                     except Exception as e:
                         logger.exception("Failed to process %s: %s", msg_id, e)
-                    last_id = msg_id
+                # ❌ Don't update last_id here — it's irrelevant when using ">"
+                # last_id = msg_id  ← remove this
+
         except asyncio.CancelledError:
             break
         except Exception as e:

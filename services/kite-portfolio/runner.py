@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 
+from app_logging import setup_logging
 from kiteconnect import KiteConnect
 
 from db import get_latest_session, save_session, save_portfolio_snapshot, upsert_instruments
@@ -18,10 +19,7 @@ from redis_client import (
 )
 from report import build_watchlist_csv
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+setup_logging("kite-portfolio")
 logger = logging.getLogger(__name__)
 
 API_KEY = os.environ.get("KITE_API_KEY", "")

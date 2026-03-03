@@ -7,11 +7,25 @@ Telegram service: single bot process.
 import asyncio
 import logging
 import os
+import sys
+from pathlib import Path
+
 import redis
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+# When running/debugging this file directly, the repo root isn't always on sys.path.
+# Ensure we can import top-level modules like `app_logging`.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+TELEGRAM_DIR = Path(__file__).resolve().parent
+if str(TELEGRAM_DIR) not in sys.path:
+    sys.path.insert(0, str(TELEGRAM_DIR))
+
+from app_logging import setup_logging
 from redis_outbound import (
     consume_outbound_loop,
     get_context_id_for_chat,
@@ -19,10 +33,7 @@ from redis_outbound import (
     get_redis,
 )
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+setup_logging("telegram")
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -36,15 +47,15 @@ def get_sync_redis():
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📋 **Available Commands:**\n\n"
+        "📋 <b>Available Commands:</b>\n\n"
         "/help - Show this message\n"
         "/ping - Check if bot is responsive\n"
-        "/login - Start Kite login flow (get URL, then /token <request_token>)\n"
-        "/token <request_token> - Submit request token after login\n"
+        "/login - Start Kite login flow (get URL, then /token &lt;request_token&gt;)\n"
+        "/token &lt;request_token&gt; - Submit request token after login\n"
         "/watchlist - Refresh and send portfolio watchlist\n"
         "/refresh_sd - Refresh static instrument data\n"
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,12 +102,25 @@ async def cmd_refresh_sd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Requesting static data refresh... You will receive a confirmation when done.")
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log handler exceptions and tell the user something went wrong."""
+    logger.exception("Update %s caused error: %s", update, context.error)
+    if update and isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Something went wrong. Check bot logs for details."
+            )
+        except Exception:
+            logger.exception("Failed to send error reply to user")
+
+
 def main():
     if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
         logger.error("Set TELEGRAM_BOT_TOKEN and CHAT_ID")
         raise SystemExit(1)
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("login", cmd_login))
@@ -111,8 +135,8 @@ def main():
         # Notify chat that bot started
         try:
             await app.bot.send_message(chat_id=CHAT_ID, text="🤖 Bot started and running!")
-        except Exception as e:
-            logger.warning("Could not send startup message: %s", e)
+        except Exception:
+            logger.exception("Could not send startup message to CHAT_ID=%s", CHAT_ID)
         # Start stream consumer in background
         consumer = asyncio.create_task(consume_outbound_loop(app))
         try:
