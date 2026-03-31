@@ -8,8 +8,9 @@ import os
 import redis
 import yfinance as yf
 from kiteconnect import KiteConnect
+import re
 
-from db import get_latest_kite_token, upsert_instruments, upsert_fundamental
+from db import get_latest_kite_token, upsert_instruments, upsert_fundamental, clear_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CACHE_INSTRUMENTS_KEY = "refdata:instruments"
 CACHE_FUNDAMENTAL_PREFIX = "refdata:fund:"
 CACHE_TTL = 86400 * 2  # 2 days
-
+clearData = True # Clear data from Redis and Postgres. Only set to True for testing.
 
 def get_redis():
     return redis.from_url(REDIS_URL, decode_responses=True)
@@ -33,12 +34,19 @@ def get_yfticker(symbol_suffix: str):
 
 def fetch_instruments(kite: KiteConnect) -> list:
     rows = []
-    for exchange in ["NSE", "BSE"]:
+    for exchange in ["NSE"]:
         for instr in kite.instruments(exchange=exchange):
             if instr.get("instrument_type") not in ("EQ", "INDEX"):
                 continue
+
+            # Skip symbols with pattern -SG, -N<any letter or number>. -T<any letter or number>apply pattern to symbol
+            symbol = instr.get("tradingsymbol")
+
+            if "-" in symbol:
+                continue
+
             rows.append({
-                "symbol": instr.get("tradingsymbol"),
+                "symbol": symbol,
                 "exchange": exchange,
                 "instrument_token": instr.get("instrument_token"),
                 "segment": instr.get("segment"),
@@ -50,8 +58,12 @@ def fetch_instruments(kite: KiteConnect) -> list:
     return rows
 
 
-def fetch_fundamentals_for_symbols(symbols: list, r: redis.Redis):
-    for symbol in symbols:
+def fetch_and_update_fundamentals_for_symbols(instruments: list, r: redis.Redis):
+    for instrument in instruments:
+        symbol = instrument.get("symbol")
+        segment = instrument.get("segment")
+        if segment == "INDICES":
+            continue
         try:
             yfticker = get_yfticker(symbol + ".NS")
             if yfticker is None and "-SM" in symbol:
@@ -76,6 +88,15 @@ def fetch_fundamentals_for_symbols(symbols: list, r: redis.Redis):
         except Exception as e:
             logger.warning("Fundamental %s: %s", symbol, e)
 
+def clear_db_and_redis():
+    clear_data()
+    r = get_redis()
+    # delete all keys in redis with the prefix CACHE_INSTRUMENTS_KEY  and CACHE_FUNDAMENTAL_PREFIX
+    for key in r.keys(f"{CACHE_INSTRUMENTS_KEY}*"):
+        r.delete(key)
+    for key in r.keys(f"{CACHE_FUNDAMENTAL_PREFIX}*"):
+        r.delete(key)
+    logger.info("Cleared data from Redis and Postgres")
 
 def run_job():
     token = get_latest_kite_token()
@@ -86,14 +107,13 @@ def run_job():
     kite.set_access_token(token)
     r = get_redis()
 
+    if clearData:
+        clear_db_and_redis()
     logger.info("Fetching instruments (EQ+INDEX)...")
     rows = fetch_instruments(kite)
     upsert_instruments(rows)
-    # Cache instrument list in Redis (e.g. list of symbols for market-data)
-    symbols = list({r["symbol"] for r in rows})
-    r.set(CACHE_INSTRUMENTS_KEY, "\n".join(symbols), ex=CACHE_TTL)
-    logger.info("Instruments: %d", len(rows))
+    
 
     logger.info("Fetching fundamentals (yfinance)...")
-    fetch_fundamentals_for_symbols(symbols[:500], r)  # limit to avoid rate limit
+    fetch_and_update_fundamentals_for_symbols(rows, r)  # limit to avoid rate limit
     logger.info("Refdata job done.")

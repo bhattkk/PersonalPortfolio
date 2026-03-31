@@ -1,7 +1,8 @@
 """Postgres: read kite_session; write instruments and fundamentals."""
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -33,7 +34,7 @@ def get_latest_kite_token():
     if not row:
         return None
     exp = row["expires_at"]
-    if exp and isinstance(exp, datetime) and exp <= datetime.utcnow():
+    if exp and isinstance(exp, datetime) and exp <= datetime.now(ZoneInfo("Asia/Kolkata")):
         return None
     return row["access_token"]
 
@@ -86,3 +87,10 @@ def upsert_fundamental(symbol: str, market_cap=None, pe=None, pb=None, week_52_h
                 """,
                 (symbol, market_cap, pe, pb, week_52_high, week_52_low, source),
             )
+
+def clear_data():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM instruments")
+            cur.execute("DELETE FROM fundamentals")
+            conn.commit()

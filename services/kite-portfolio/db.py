@@ -3,6 +3,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -37,7 +38,8 @@ def get_latest_session():
     if not row:
         return None
     expires_at = row["expires_at"]
-    if isinstance(expires_at, datetime) and expires_at <= datetime.utcnow():
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    if isinstance(expires_at, datetime) and expires_at <= now:
         return None
     return dict(row)
 
@@ -45,7 +47,7 @@ def get_latest_session():
 def save_session(access_token: str, valid_hours: int = 24):
     with get_conn() as conn:
         with conn.cursor() as cur:
-            now = datetime.utcnow()
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
             expires_at = now + timedelta(hours=valid_hours)
             cur.execute(
                 """
@@ -59,7 +61,7 @@ def save_session(access_token: str, valid_hours: int = 24):
 def save_portfolio_snapshot(rows: list, snapshot_id: str = None):
     """rows: list of dicts with tradingsymbol, type, quantity, average_price, last_price, pnl, pnl_percent, etc."""
     sid = snapshot_id or str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
     with get_conn() as conn:
         with conn.cursor() as cur:
             for r in rows:

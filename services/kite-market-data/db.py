@@ -2,6 +2,7 @@
 import os
 from contextlib import contextmanager
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -31,7 +32,8 @@ def get_kite_token():
             row = cur.fetchone()
     if not row:
         return None
-    if row["expires_at"] and row["expires_at"] <= datetime.utcnow():
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    if row["expires_at"] and row["expires_at"] <= now:
         return None
     return row["access_token"]
 
