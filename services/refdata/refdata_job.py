@@ -1,6 +1,6 @@
 """
 Single job: fetch Kite instruments (EQ+INDEX), yfinance fundamentals; write Postgres + Redis.
-Uses Kite token from Postgres (shared with kite-portfolio).
+Uses Kite token from Postgres (shared with stocks service).
 """
 import logging
 import os
@@ -8,7 +8,7 @@ import os
 import redis
 import yfinance as yf
 from kiteconnect import KiteConnect
-import re
+import time
 
 from db import get_latest_kite_token, upsert_instruments, upsert_fundamental, clear_data
 
@@ -39,9 +39,9 @@ def fetch_instruments(kite: KiteConnect) -> list:
             if instr.get("instrument_type") not in ("EQ", "INDEX"):
                 continue
 
-            # Skip symbols with pattern -SG, -N<any letter or number>. -T<any letter or number>apply pattern to symbol
             symbol = instr.get("tradingsymbol")
 
+            # TODO - Skipping all the stocks with - in the symols this also include all SME stocks (-SM) and only delivery stocks (-BE)
             if "-" in symbol:
                 continue
 
@@ -59,6 +59,7 @@ def fetch_instruments(kite: KiteConnect) -> list:
 
 
 def fetch_and_update_fundamentals_for_symbols(instruments: list, r: redis.Redis):
+
     for instrument in instruments:
         symbol = instrument.get("symbol")
         segment = instrument.get("segment")
@@ -66,8 +67,6 @@ def fetch_and_update_fundamentals_for_symbols(instruments: list, r: redis.Redis)
             continue
         try:
             yfticker = get_yfticker(symbol + ".NS")
-            if yfticker is None and "-SM" in symbol:
-                yfticker = get_yfticker(symbol.replace("-SM", "") + ".NS")
             if yfticker is None:
                 continue
             info = yfticker.info
@@ -115,5 +114,9 @@ def run_job():
     
 
     logger.info("Fetching fundamentals (yfinance)...")
-    fetch_and_update_fundamentals_for_symbols(rows, r)  # limit to avoid rate limit
+    # do this is batches of 100 symbols. After each batch wait for 1 minute.
+    for i in range(0, len(rows), 100):
+        batch = rows[i:i+100]
+        fetch_and_update_fundamentals_for_symbols(batch, r)
+        time.sleep(60)
     logger.info("Refdata job done.")

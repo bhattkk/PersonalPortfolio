@@ -42,7 +42,7 @@ def setup_logging(service_name: str) -> logging.Logger:
     Configure logging for a service: one file per run (service_name_YYYY-MM-DD_HH-MM-SS.log)
     in the app logs directory. Prunes older files so only LOG_RETENTION_COUNT are kept.
 
-    Use for: telegram, kite-portfolio, kite-market-data, stocks-refdata.
+    Use for: telegram, stocks, prices, refdata.
     Do not use for: redis, postgres.
     """
     log_dir = _get_log_dir()

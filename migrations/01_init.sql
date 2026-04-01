@@ -1,4 +1,5 @@
--- Portfolio app schema: instruments, fundamentals, kite_session, portfolio_snapshots
+-- Portfolio app schema: instruments, fundamentals, kite_session, portfolio_snapshots.
+-- watchlist: see 02_watchlist.sql
 
 CREATE TABLE IF NOT EXISTS instruments (
     id SERIAL PRIMARY KEY,

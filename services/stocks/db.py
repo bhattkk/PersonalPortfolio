@@ -1,4 +1,4 @@
-"""Postgres: kite_session and portfolio_snapshots."""
+"""Postgres: kite_session, portfolio_snapshots, instruments, watchlist."""
 import os
 import uuid
 from contextlib import contextmanager
@@ -119,3 +119,39 @@ def upsert_instruments(rows: list):
                         r.get("nse_token"),
                     ),
                 )
+
+
+def upsert_watchlist(
+    symbol: str,
+    instrument_token: int,
+    name: str = None,
+    last_price=None,
+):
+    """Insert or update a row in watchlist (unique instrument_token)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO watchlist (symbol, name, last_price, instrument_token, updated_at)
+                VALUES (%s, %s, %s, %s, NOW())
+                ON CONFLICT (instrument_token) DO UPDATE SET
+                    symbol = EXCLUDED.symbol,
+                    name = EXCLUDED.name,
+                    last_price = EXCLUDED.last_price,
+                    updated_at = NOW()
+                """,
+                (symbol, name, last_price, instrument_token),
+            )
+
+
+def list_watchlist():
+    """Return all watchlist rows as dicts."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, symbol, name, last_price, instrument_token, updated_at
+                FROM watchlist ORDER BY symbol
+                """
+            )
+            return [dict(row) for row in cur.fetchall()]

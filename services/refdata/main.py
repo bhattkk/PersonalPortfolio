@@ -1,5 +1,5 @@
 """
-stocks-refdata: scheduler runs instruments + fundamentals at midnight; optional run on startup.
+refdata: scheduler runs instruments + fundamentals at midnight; optional run on startup.
 """
 import logging
 import os
@@ -12,9 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-STOCKS_REFDATA_DIR = Path(__file__).resolve().parent
-if str(STOCKS_REFDATA_DIR) not in sys.path:
-    sys.path.insert(0, str(STOCKS_REFDATA_DIR))
+REFDATA_DIR = Path(__file__).resolve().parent
+if str(REFDATA_DIR) not in sys.path:
+    sys.path.insert(0, str(REFDATA_DIR))
 
 
 
@@ -24,7 +24,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from refdata_job import run_job
 
-setup_logging("stocks-refdata")
+setup_logging("refdata")
 logger = logging.getLogger(__name__)
 
 runNow = True # Run the job immediately. Only set to True for testing.

@@ -14,7 +14,7 @@ def get_redis():
 
 
 def get_symbols_from_redis(r) -> list:
-    """If stocks-refdata has run, symbols are in refdata:instruments (newline-sep)."""
+    """If refdata has run, symbols are in refdata:instruments (newline-sep)."""
     raw = r.get(REFDATA_INSTRUMENTS_KEY)
     if not raw:
         return []

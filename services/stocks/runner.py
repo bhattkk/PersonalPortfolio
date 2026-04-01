@@ -1,5 +1,5 @@
 """
-kite-portfolio service: subscribe to telegram:commands; handle login, watchlist, refresh_sd.
+stocks service: subscribe to telegram:commands; handle login, watchlist, refresh_sd.
 Session in Postgres; outbound via Redis stream; token reply via Redis reply_context.
 """
 import logging
@@ -19,7 +19,7 @@ from redis_client import (
 )
 from report import build_watchlist_csv
 
-setup_logging("kite-portfolio")
+setup_logging("stocks")
 logger = logging.getLogger(__name__)
 
 API_KEY = os.environ.get("KITE_API_KEY", "")
@@ -152,7 +152,7 @@ def main():
     if not API_KEY or not API_SECRET or not CHAT_ID:
         logger.error("Set KITE_API_KEY, KITE_API_SECRET, TELEGRAM_CHAT_ID")
         raise SystemExit(1)
-    logger.info("kite-portfolio: subscribing to telegram:commands")
+    logger.info("stocks: subscribing to telegram:commands")
     subscribe_commands(on_command)
 
 

@@ -1,5 +1,5 @@
 """
-kite-market-data: read instruments from Postgres; fetch LTP from Kite (exchange:tradingsymbol); write to Redis.
+prices: read instruments from Postgres; fetch LTP from Kite (exchange:tradingsymbol); write to Redis.
 Runs on a timer (e.g. every 1–5 min). Uses same Kite token from Postgres.
 """
 import logging
@@ -12,7 +12,7 @@ from kiteconnect import KiteConnect
 from db import get_eq_index_instrument_tokens, get_kite_token
 from redis_cache import get_redis, set_ltp
 
-setup_logging("kite-market-data")
+setup_logging("prices")
 logger = logging.getLogger(__name__)
 
 INTERVAL_SEC = int(os.environ.get("MARKET_DATA_INTERVAL", "60"))
@@ -29,7 +29,7 @@ def run_ltp_cycle():
     r = get_redis()
     instruments = get_eq_index_instrument_tokens(limit=1000)
     if not instruments:
-        logger.warning("No instruments in DB. Run stocks-refdata or /refresh_sd first.")
+        logger.warning("No instruments in DB. Run refdata or /refresh_sd first.")
         return
     # Kite ltp() accepts list of "EXCHANGE:SYMBOL"; max 250 per request
     keys = [f"{x['exchange']}:{x['tradingsymbol']}" for x in instruments]
@@ -59,7 +59,7 @@ def run_ltp_cycle():
 
 
 def main():
-    logger.info("kite-market-data: interval=%ds", INTERVAL_SEC)
+    logger.info("prices: interval=%ds", INTERVAL_SEC)
     while True:
         run_ltp_cycle()
         time.sleep(INTERVAL_SEC)

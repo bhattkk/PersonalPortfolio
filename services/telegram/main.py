@@ -2,7 +2,7 @@
 Telegram service: single bot process.
 - Poll Telegram; handle /login, /token, /watchlist, /refresh_sd, /help, /ping.
 - Consume Redis stream telegram:outbound (login URL + portfolio report); send to chat.
-- Reply context in Redis only: /token writes to context; kite-portfolio reads from Redis.
+- Reply context in Redis only: /token writes to context; stocks service reads from Redis.
 """
 import asyncio
 import logging
@@ -63,12 +63,12 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Login: we only tell user to use /login; kite-portfolio pushes URL via stream with reply_context."""
+    """Login: we only tell user to use /login; stocks service pushes URL via stream with reply_context."""
     await update.message.reply_text(
-        "Login is handled by kite-portfolio. Requesting login URL... "
+        "Login is handled by the stocks service. Requesting login URL... "
         "You will receive a message with the URL; then use /token <request_token>."
     )
-    # Notify via Redis that login was requested (kite-portfolio can listen or we push a command stream)
+    # Notify via Redis that login was requested (stocks service listens on telegram:commands)
     r = get_sync_redis()
     r.publish("telegram:commands", "login")
 

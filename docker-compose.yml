@@ -1,5 +1,5 @@
 # Docker Compose Portfolio Application
-# Services: postgres, redis, telegram, kite-portfolio, stocks-refdata, kite-market-data
+# Services: postgres, redis, telegram, stocks, refdata, prices
 # Secrets via env: KITE_API_KEY, KITE_API_SECRET, TELEGRAM_BOT_TOKEN, CHAT_ID
 
 services:
@@ -52,10 +52,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  kite-portfolio:
+  stocks:
     build:
       context: .
-      dockerfile: services/kite-portfolio/Dockerfile
+      dockerfile: services/stocks/Dockerfile
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -74,10 +74,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  stocks-refdata:
+  refdata:
     build:
       context: .
-      dockerfile: services/stocks-refdata/Dockerfile
+      dockerfile: services/refdata/Dockerfile
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -95,10 +95,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  kite-market-data:
+  prices:
     build:
       context: .
-      dockerfile: services/kite-market-data/Dockerfile
+      dockerfile: services/prices/Dockerfile
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
